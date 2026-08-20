@@ -22,7 +22,7 @@ function App() {
   useEffect(() => {
     const fetchDrivers = async () => {
       try {
-        const res = await axios.get('http://localhost:4000/riders/nearby-drivers', {
+        const res = await axios.get('https://ride-matching-backend.onrender.com/riders/nearby-drivers', {
           params: { lat: JAIPUR_CENTER[0], lng: JAIPUR_CENTER[1], radiusKm: 10 }
         });
         setDrivers(res.data.drivers || []);
@@ -45,7 +45,7 @@ function App() {
     setRideStatus(null);
     try {
       const nearestDriver = drivers[0]; // already sorted ASC by distance from backend
-      const res = await axios.post('http://localhost:4000/rides/request', {
+      const res = await axios.post('https://ride-matching-backend.onrender.com/rides/request', {
         driverId: nearestDriver.id,
         riderId: RIDER_ID,
       });
