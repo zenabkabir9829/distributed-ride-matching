@@ -3,7 +3,7 @@
 A real-time ride-hailing dispatch system demonstrating distributed-systems concepts: geospatial indexing, distributed locking, event-driven architecture, and real-time communication — inspired by Uber's dispatch system design.
 
 ## Live Demo
-[Add link here once deployed]
+[View Live](https://distributed-ride-matching-six.vercel.app/)
 
 ## Architecture
 **Flow:**
