@@ -6,6 +6,10 @@ const { assignDriver } = require('./services/matching');
 const { setupWebSocket, sendToUser } = require('./ws/socket');
 const app = express();
 app.use(express.json());
+app.use((req, res, next) => {
+  console.log(`[PORT ${process.env.PORT || 4000}] ${req.method} ${req.path}`);
+  next();
+});
 const connectMongo = require('./config/mongo');
 connectMongo();
 const { trackRiderDemand, getSurgeMultiplier } = require('./services/pricing');
