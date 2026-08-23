@@ -16,53 +16,76 @@ const { trackRiderDemand, getSurgeMultiplier } = require('./services/pricing');
 const cors = require('cors');
 app.use(cors());
 app.get('/pricing/surge', async (req, res) => {
-  const { lat, lng } = req.query;
-  const multiplier = await getSurgeMultiplier(parseFloat(lat), parseFloat(lng));
-  res.json({ surgeMultiplier: multiplier });
+  try {
+    const { lat, lng } = req.query;
+    const multiplier = await getSurgeMultiplier(parseFloat(lat), parseFloat(lng));
+    res.json({ surgeMultiplier: multiplier });
+  } catch (err) {
+    console.error('Redis error in pricing/surge:', err.message);
+    res.status(503).json({ error: 'Service temporarily unavailable' });
+  }
 });
 
 app.post('/rides/demand-signal', async (req, res) => {
-  const { riderId } = req.body;
-  await trackRiderDemand(riderId);
-  res.json({ status: 'tracked' });
+  try {
+    const { riderId } = req.body;
+    await trackRiderDemand(riderId);
+    res.json({ status: 'tracked' });
+  } catch (err) {
+    console.error('Redis error in demand-signal:', err.message);
+    res.status(503).json({ error: 'Service temporarily unavailable' });
+  }
 });
 // Driver sends their location
 app.post('/driver/:id/location', async (req, res) => {
-  const { id } = req.params;
-  const { lat, lng, riderId } = req.body;
-  await redis.geoadd('drivers:locations', lng, lat, id);
+  try {
+    const { id } = req.params;
+    const { lat, lng, riderId } = req.body;
+    await redis.geoadd('drivers:locations', lng, lat, id);
 
-  // If this driver is currently serving a rider, push them the live update
-  if (riderId) {
-    sendToUser(riderId, { type: 'driver_location', driverId: id, lat, lng });
+    if (riderId) {
+      sendToUser(riderId, { type: 'driver_location', driverId: id, lat, lng });
+    }
+
+    res.json({ status: 'updated', id, lat, lng });
+  } catch (err) {
+    console.error('Redis error in location update:', err.message);
+    res.status(503).json({ error: 'Service temporarily unavailable' });
   }
-
-  res.json({ status: 'updated', id, lat, lng });
 });
 
 // Find nearby drivers to a rider location
 app.get('/riders/nearby-drivers', async (req, res) => {
-  const { lat, lng, radiusKm = 5 } = req.query;
-  const results = await redis.geosearch(
-    'drivers:locations', 'FROMLONLAT', lng, lat,
-    'BYRADIUS', radiusKm, 'km', 'ASC',
-    'WITHCOORD'
-  );
+  try {
+    const { lat, lng, radiusKm = 5 } = req.query;
+    const results = await redis.geosearch(
+      'drivers:locations', 'FROMLONLAT', lng, lat,
+      'BYRADIUS', radiusKm, 'km', 'ASC',
+      'WITHCOORD'
+    );
 
-  // results come back as [ [driverId, [lng, lat]], ... ]
-  const drivers = results.map(([id, [dLng, dLat]]) => ({
-    id,
-    lat: parseFloat(dLat),
-    lng: parseFloat(dLng),
-  }));
+    const drivers = results.map(([id, [dLng, dLat]]) => ({
+      id,
+      lat: parseFloat(dLat),
+      lng: parseFloat(dLng),
+    }));
 
-  res.json({ drivers });
+    res.json({ drivers });
+  } catch (err) {
+    console.error('Redis error in nearby-drivers:', err.message);
+    res.status(503).json({ error: 'Service temporarily unavailable' });
+  }
 });
 
 app.post('/rides/request', async (req, res) => {
-  const { driverId, riderId } = req.body;
-  const result = await assignDriver(driverId, riderId);
-  res.json(result);
+  try {
+    const { driverId, riderId } = req.body;
+    const result = await assignDriver(driverId, riderId);
+    res.json(result);
+  } catch (err) {
+    console.error('Error in rides/request:', err.message);
+    res.status(503).json({ error: 'Service temporarily unavailable' });
+  }
 });
 const server = http.createServer(app);
 const { clients } = setupWebSocket(server);
