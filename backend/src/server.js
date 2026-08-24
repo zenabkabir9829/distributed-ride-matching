@@ -25,14 +25,7 @@ app.get('/pricing/surge', async (req, res) => {
     res.status(503).json({ error: 'Service temporarily unavailable' });
   }
 });
-app.post('/debug/free-driver/:id', async (req, res) => {
-  try {
-    await redis.del(`driver:${req.params.id}:status`);
-    res.json({ status: 'freed', id: req.params.id });
-  } catch (err) {
-    res.status(503).json({ error: 'Service temporarily unavailable' });
-  }
-});
+
 app.post('/rides/demand-signal', async (req, res) => {
   try {
     const { riderId } = req.body;

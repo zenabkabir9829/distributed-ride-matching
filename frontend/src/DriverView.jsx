@@ -7,25 +7,39 @@ export default function DriverView() {
   const driverId = 'driver1'; // hardcoded for demo
 
   useEffect(() => {
-    const ws = new WebSocket('wss://ride-matching-backend.onrender.com');
+  let ws;
+  let isMounted = true;
+
+  const connect = () => {
+    ws = new WebSocket('wss://ride-matching-backend.onrender.com');
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (!isMounted) return;
       setConnected(true);
       ws.send(JSON.stringify({ type: 'register', userId: driverId }));
     };
 
     ws.onmessage = (event) => {
+      if (!isMounted) return;
       const data = JSON.parse(event.data);
       if (data.type === 'new_ride_request') {
         setRides((prev) => [data, ...prev]);
       }
     };
 
-    ws.onclose = () => setConnected(false);
+    ws.onclose = () => {
+      if (isMounted) setConnected(false);
+    };
+  };
 
-    return () => ws.close();
-  }, []);
+  connect();
+
+  return () => {
+    isMounted = false;
+    ws?.close();
+  };
+}, []);
 
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
