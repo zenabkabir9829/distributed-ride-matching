@@ -1,5 +1,6 @@
 # Distributed Ride Matching Engine
 
+![CI](https://github.com/zenabkabir9829/distributed-ride-matching/actions/workflows/ci.yml/badge.svg)
 A real-time ride-hailing dispatch system demonstrating distributed-systems concepts: geospatial indexing, distributed locking, event-driven architecture, and real-time communication — inspired by Uber's dispatch system design.
 
 ## Live Demo
