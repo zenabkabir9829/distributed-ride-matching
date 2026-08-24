@@ -1,7 +1,7 @@
 const redis = require('../config/redis');
 const Redlock = require('redlock').default;
 const Trip = require('../models/Trip');
-
+const { sendToUser } = require('../ws/socket');
 const redlock = new Redlock([redis], {
   retryCount: 3,
   retryDelay: 200, // ms
@@ -26,7 +26,9 @@ async function assignDriver(driverId, riderId) {
     await redis.set(`driver:${driverId}:status`, 'busy');
     await redis.zrem('drivers:locations', driverId);
 
-    const trip = await Trip.create({ driverId, riderId, status: 'assigned' });
+        const trip = await Trip.create({ driverId, riderId, status: 'assigned' });
+
+    sendToUser(driverId, { type: 'new_ride_request', riderId, tripId: trip._id });
 
     return { success: true, driverId, riderId, tripId: trip._id };
   } catch (err) {
