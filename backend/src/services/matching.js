@@ -49,7 +49,12 @@ async function assignDriver(driverId, riderId, riderLat, riderLng) {
       eta = calculateETA(parseFloat(riderLat), parseFloat(riderLng), parseFloat(driverLat), parseFloat(driverLng));
     }
 
-    await redis.set(`driver:${driverId}:status`, 'busy');
+        await redis.set(`driver:${driverId}:status`, 'busy');
+
+    if (driverLat && driverLng) {
+      await redis.set(`driver:${driverId}:lastpos`, JSON.stringify({ lat: driverLat, lng: driverLng }));
+    }
+
     await redis.zrem('drivers:locations', driverId);
 
     const trip = await Trip.create({ driverId, riderId, status: 'assigned' });

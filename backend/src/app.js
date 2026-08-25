@@ -16,7 +16,40 @@ app.use((req, res, next) => {
 });
 
 connectMongo();
+app.post('/rides/:tripId/cancel', async (req, res) => {
+  try {
+    const { tripId } = req.params;
+    const { cancelledBy } = req.body; // 'rider' or 'driver'
 
+    const trip = await Trip.findById(tripId);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+    if (trip.status === 'completed' || trip.status === 'cancelled') {
+      return res.status(400).json({ error: `Trip already ${trip.status}` });
+    }
+
+    trip.status = 'cancelled';
+    await trip.save();
+
+        // Free the driver back into the pool at their last known location
+    await redis.del(`driver:${trip.driverId}:status`);
+
+    const lastPosRaw = await redis.get(`driver:${trip.driverId}:lastpos`);
+    if (lastPosRaw) {
+      const { lat, lng } = JSON.parse(lastPosRaw);
+      await redis.geoadd('drivers:locations', lng, lat, trip.driverId);
+    }
+
+    // Notify both sides
+    sendToUser(trip.riderId, { type: 'ride_cancelled', tripId, cancelledBy });
+    sendToUser(trip.driverId, { type: 'ride_cancelled', tripId, cancelledBy });
+
+    res.json({ success: true, tripId, status: 'cancelled' });
+  } catch (err) {
+    console.error('Error in rides/cancel:', err.message);
+    res.status(503).json({ error: 'Service temporarily unavailable' });
+  }
+});
 app.get('/pricing/surge', async (req, res) => {
   try {
     const { lat, lng } = req.query;
