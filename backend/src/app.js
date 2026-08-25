@@ -80,8 +80,8 @@ app.get('/riders/nearby-drivers', async (req, res) => {
 
 app.post('/rides/request', async (req, res) => {
   try {
-    const { driverId, riderId } = req.body;
-    const result = await assignDriver(driverId, riderId);
+    const { driverId, riderId, riderLat, riderLng } = req.body;
+    const result = await assignDriver(driverId, riderId, riderLat, riderLng);
     res.json(result);
   } catch (err) {
     console.error('Error in rides/request:', err.message);
