@@ -15,7 +15,7 @@ A real-time ride-hailing dispatch system demonstrating distributed-systems conce
 5. Surge pricing dynamically adjusts based on live demand/supply ratio
 
 ## Key Engineering Decisions
-
+See [docs/ADR.md](./docs/ADR.md) for detailed architecture decisions and two real bugs found via deliberate testing.
 - **Redis Geospatial vs SQL spatial queries**: chosen for O(log N) radius search performance at scale
 - **Redlock over simple SETNX**: provides safer distributed locking semantics with automatic expiry, preventing deadlocks if a service crashes mid-transaction
 - **WebSockets over polling**: sub-second location updates without the overhead of constant HTTP polling
