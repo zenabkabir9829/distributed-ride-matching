@@ -6,7 +6,7 @@ const connectMongo = require('./config/mongo');
 const { assignDriver } = require('./services/matching');
 const { sendToUser } = require('./ws/socket');
 const { trackRiderDemand, getSurgeMultiplier } = require('./services/pricing');
-
+const { register, httpRequestDuration } = require('./metrics');
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -14,7 +14,19 @@ app.use((req, res, next) => {
   console.log(`[PORT ${process.env.PORT || 4000}] ${req.method} ${req.path}`);
   next();
 });
-
+app.use((req, res, next) => {
+  const start = process.hrtime();
+  res.on('finish', () => {
+    const [sec, nano] = process.hrtime(start);
+    const duration = sec + nano / 1e9;
+    httpRequestDuration.labels(req.method, req.path, res.statusCode).observe(duration);
+  });
+  next();
+});
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
+});
 connectMongo();
 app.post('/rides/:tripId/cancel', async (req, res) => {
   try {

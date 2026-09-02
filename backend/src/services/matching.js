@@ -1,13 +1,16 @@
 const redis = require('../config/redis');
 const Redlock = require('redlock').default;
 const Trip = require('../models/Trip');
+const { rideRequestCounter, lockContentionCounter } = require('../metrics');
 const { sendToUser } = require('../ws/socket');
+
 const redlock = new Redlock([redis], {
   retryCount: 3,
-  retryDelay: 200, // ms
+  retryDelay: 200,
 });
+
 function calculateETA(lat1, lng1, lat2, lng2) {
-  const R = 6371; // Earth radius in km
+  const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLng = (lng2 - lng1) * (Math.PI / 180);
   const a =
@@ -18,13 +21,12 @@ function calculateETA(lat1, lng1, lat2, lng2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distanceKm = R * c;
 
-  const avgSpeedKmh = 25; // rough city-traffic average
+  const avgSpeedKmh = 25;
   const etaMinutes = Math.ceil((distanceKm / avgSpeedKmh) * 60);
 
   return { distanceKm: parseFloat(distanceKm.toFixed(2)), etaMinutes };
 }
 
-module.exports.calculateETA = calculateETA;
 async function assignDriver(driverId, riderId, riderLat, riderLng) {
   const lockKey = `lock:driver:${driverId}`;
   let lock;
@@ -32,12 +34,14 @@ async function assignDriver(driverId, riderId, riderLat, riderLng) {
     lock = await redlock.acquire([lockKey], 5000);
   } catch (err) {
     console.error('Redlock/Redis unavailable:', err.message);
+    rideRequestCounter.labels('infra_error').inc();
     return { success: false, reason: 'Service temporarily unavailable', infra: true };
   }
 
   try {
-        const status = await redis.get(`driver:${driverId}:status`);
+    const status = await redis.get(`driver:${driverId}:status`);
     if (status === 'busy') {
+      lockContentionCounter.inc();
       throw new Error('Driver already assigned');
     }
 
@@ -49,7 +53,7 @@ async function assignDriver(driverId, riderId, riderLat, riderLng) {
       eta = calculateETA(parseFloat(riderLat), parseFloat(riderLng), parseFloat(driverLat), parseFloat(driverLng));
     }
 
-        await redis.set(`driver:${driverId}:status`, 'busy');
+    await redis.set(`driver:${driverId}:status`, 'busy');
 
     if (driverLat && driverLng) {
       await redis.set(`driver:${driverId}:lastpos`, JSON.stringify({ lat: driverLat, lng: driverLng }));
@@ -61,12 +65,14 @@ async function assignDriver(driverId, riderId, riderLat, riderLng) {
 
     sendToUser(driverId, { type: 'new_ride_request', riderId, tripId: trip._id });
 
+    rideRequestCounter.labels('success').inc();
     return { success: true, driverId, riderId, tripId: trip._id, eta };
   } catch (err) {
+    rideRequestCounter.labels('failed').inc();
     return { success: false, reason: err.message };
   } finally {
-    if (lock) await lock.release().catch(() => {}); // don't crash if release also fails
+    if (lock) await lock.release().catch(() => {});
   }
 }
 
-module.exports = { assignDriver };
+module.exports = { assignDriver, calculateETA };
