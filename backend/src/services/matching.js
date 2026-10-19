@@ -27,6 +27,10 @@ function calculateETA(lat1, lng1, lat2, lng2) {
   return { distanceKm: parseFloat(distanceKm.toFixed(2)), etaMinutes };
 }
 
+// Busy flag expires on its own so a crashed instance can never strand a driver forever.
+// Complete/cancel delete it explicitly; this is only the safety net.
+const BUSY_TTL_SEC = 30 * 60;
+
 async function assignDriver(driverId, riderId, riderLat, riderLng) {
   const lockKey = `lock:driver:${driverId}`;
   let lock;
@@ -38,6 +42,13 @@ async function assignDriver(driverId, riderId, riderLat, riderLng) {
     return { success: false, reason: 'Service temporarily unavailable', infra: true };
   }
 
+  // Track what we've changed so a failure part-way through can be undone.
+  let claimed = false;      // busy flag + lastpos written
+  let removedFromGeo = false;
+  let trip = null;
+  let driverLat = null;
+  let driverLng = null;
+
   try {
     const status = await redis.get(`driver:${driverId}:status`);
     if (status === 'busy') {
@@ -46,28 +57,41 @@ async function assignDriver(driverId, riderId, riderLat, riderLng) {
     }
 
     const driverPos = await redis.geopos('drivers:locations', driverId);
-    const [driverLng, driverLat] = driverPos[0] || [null, null];
+    [driverLng, driverLat] = driverPos[0] || [null, null];
 
     let eta = null;
     if (driverLat && driverLng && riderLat && riderLng) {
       eta = calculateETA(parseFloat(riderLat), parseFloat(riderLng), parseFloat(driverLat), parseFloat(driverLng));
     }
 
-    await redis.set(`driver:${driverId}:status`, 'busy');
+    // Order matters: do the step most likely to fail (Mongo) BEFORE removing the
+    // driver from the pool, so the common failure leaves nothing to undo.
+    await redis.set(`driver:${driverId}:status`, 'busy', 'EX', BUSY_TTL_SEC);
+    claimed = true;
 
     if (driverLat && driverLng) {
-      await redis.set(`driver:${driverId}:lastpos`, JSON.stringify({ lat: driverLat, lng: driverLng }));
+      await redis.set(
+        `driver:${driverId}:lastpos`,
+        JSON.stringify({ lat: driverLat, lng: driverLng }),
+        'EX', BUSY_TTL_SEC
+      );
     }
 
-    await redis.zrem('drivers:locations', driverId);
+    trip = await Trip.create({ driverId, riderId, status: 'assigned' });
 
-    const trip = await Trip.create({ driverId, riderId, status: 'assigned' });
+    await redis.zrem('drivers:locations', driverId);
+    removedFromGeo = true;
 
     sendToUser(driverId, { type: 'new_ride_request', riderId, tripId: trip._id });
 
     rideRequestCounter.labels('success').inc();
     return { success: true, driverId, riderId, tripId: trip._id, eta };
   } catch (err) {
+    if (claimed) {
+      await rollbackAssignment({ driverId, trip, removedFromGeo, driverLat, driverLng });
+      rideRequestCounter.labels('infra_error').inc();
+      return { success: false, reason: 'Service temporarily unavailable', infra: true };
+    }
     rideRequestCounter.labels('failed').inc();
     return { success: false, reason: err.message };
   } finally {
@@ -75,4 +99,20 @@ async function assignDriver(driverId, riderId, riderLat, riderLng) {
   }
 }
 
-module.exports = { assignDriver, calculateETA };
+// Compensating actions: best-effort undo of a half-finished assignment.
+// Each step is isolated so one failing (e.g. Redis down) doesn't skip the rest.
+async function rollbackAssignment({ driverId, trip, removedFromGeo, driverLat, driverLng }) {
+  const attempt = async (label, fn) => {
+    try { await fn(); } catch (e) { console.error(`Rollback step "${label}" failed:`, e.message); }
+  };
+
+  if (trip) {
+    await attempt('cancel trip', () => Trip.findByIdAndUpdate(trip._id, { status: 'cancelled' }));
+  }
+  if (removedFromGeo && driverLat && driverLng) {
+    await attempt('restore geo', () => redis.geoadd('drivers:locations', driverLng, driverLat, driverId));
+  }
+  await attempt('clear busy', () => redis.del(`driver:${driverId}:status`));
+}
+
+module.exports = { assignDriver, calculateETA, BUSY_TTL_SEC };
